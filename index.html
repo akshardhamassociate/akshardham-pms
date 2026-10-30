@@ -7,7 +7,7 @@
 <title>Akshardham PMS</title>
 <link rel="icon" href="logo.png">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" media="print" onload="this.media='all'">
 <style>
 /* Design tokens: Akshardham PMS PRD v1, section 6.2 */
 :root{--pri:#3446A8;--pri-d:#243B78;--pri-l:#EBEEF8;--bg:#F3F5F9;--card:#FFFFFF;--ink:#182230;--mut:#667085;--line:#E2E6EF;
@@ -235,6 +235,7 @@ body.field{overflow:hidden}
   .drawer{top:auto;max-height:92vh;border-radius:16px 16px 0 0}
   #toast{bottom:84px}
 }
+.ibtn.spin svg{animation:rot 1s linear infinite}@keyframes rot{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
@@ -248,7 +249,7 @@ const TASKS_API = 'https://script.google.com/macros/s/AKfycbydef8G6aaxfIyQgwJ_84
 const FIELD_API = 'https://script.google.com/macros/s/AKfycbxgNOAHAa7v1LmnoklvbeHt2kGYBB_7Bq2tqI-8yJQT73VZXgjytt6J_JOetGF5CU4c/exec';
 const FIELD_APP = '../Sarola-Database/?embed=1';   // Field Data screen (same website, isliye login wahan bhi chalta hai)
 const PROJECT = 'Project Sarola';
-const VER = '30 Oct · v3';
+const VER = '30 Oct · v4';
 /* =============================================================== */
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -295,7 +296,7 @@ const dueTxt = t => { const d = t.daysLeft; if (d === '' || d == null) return '<
 const initials = n => String(n || '?').split(/\s+/).slice(0, 2).map(w => w[0] || '').join('').toUpperCase();
 const ROLE = { A: 'Accountable', R: 'Responsible', C: 'Consulted', I: 'Informed' };
 
-let S = { token: ls.get('ts_token') || '', code: ls.get('ts_code') || '', me: null, dash: null, field: null, team: [], msgs: null, ed: null, person: '',
+let S = { token: ls.get('ts_token') || '', code: ls.get('ts_code') || '', me: null, dash: null, field: null, team: [], sync: false, draft: {}, t0: Date.now(), msgs: null, ed: null, person: '',
   stale: false, err: '', scope: 'mine', filter: 'all', tview: ls.get('pms_tview') || 'list', q: '', menu: '', pick: {}, mini: ls.get('pms_mini') === '1' };
 
 /* ---------------- API ---------------- */
@@ -307,7 +308,8 @@ async function post(url, body) {
   if (!j.ok) throw new Error(j.error || 'Something went wrong');
   return j.data;
 }
-const api = (action, p) => post(TASKS_API, Object.assign({ action }, S.token ? { token: S.token } : {}, p || {}));
+const WRITES = ['accept', 'report', 'verify', 'taskSave', 'taskDelete'];
+const api = (action, p) => post(TASKS_API, Object.assign({ action }, S.token ? { token: S.token } : {}, WRITES.includes(action) && isMgr() ? { withDash: true } : {}, p || {}));
 function toast(m, bad) { const t = $('#toast'); t.textContent = m; t.className = bad ? 'bad' : ''; t.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => t.hidden = true, bad ? 5000 : 2600) }
 const isAuthErr = e => /Login|PIN|Code galat/i.test(e.message);
 
@@ -331,31 +333,51 @@ const isMgr = () => S.me && S.me.isCoordinator;
 function allTasks() { return isMgr() && S.dash ? S.dash.tasks : [] }
 function taskById(id) { return myTasks().find(t => t.id === id) || allTasks().find(t => t.id === id) }
 
+/* Speed: ek call me login + dashboard ("boot"). Purana backend ho to do call (login, dashboard). */
+async function bootCall(cred) {
+  try { return await post(TASKS_API, Object.assign({ action: 'boot' }, cred)) }
+  catch (e) { if (!/Unknown action/.test(e.message)) throw e;
+    const me = await post(TASKS_API, Object.assign({ action: 'login' }, cred));
+    if (me.isCoordinator) me.dash = await post(TASKS_API, { action: 'dashboard', token: me.token }); return me }
+}
+function applyBoot(me) {
+  if (me.token) { S.token = me.token; ls.set('ts_token', me.token); delete me.token }
+  if (me.dash) { S.dash = me.dash; S.dash.at = Date.now(); ls.set('pms_dash', JSON.stringify(S.dash)); delete me.dash }
+  S.me = me; S.code = me.code; ls.set('ts_code', me.code); ls.set('pms_me_' + me.code, JSON.stringify(me)); S.stale = false; S.err = '';
+}
 async function boot() {
   ls.set('ts_pin', null);
   if (!S.token) return renderLogin();
   let cached = null; try { cached = JSON.parse(ls.get('pms_me_' + S.code)) } catch (e) { }
-  if (cached) { S.me = cached; S.stale = true; try { S.dash = JSON.parse(ls.get('pms_dash')) } catch (e) { } render() } else renderLoading();
+  try { S.field = JSON.parse(ls.get('sfd_cache')) } catch (e) { }
+  // Pichhla data turant dikhao, naya peeche se aata rahe
+  if (cached) { S.me = cached; try { S.dash = JSON.parse(ls.get('pms_dash')) } catch (e) { } render() } else renderLoading();
   await refresh(true);
 }
 async function refresh(quiet) {
+  S.sync = true; const rb = $('.ibtn[aria-label="Refresh"]'); if (rb) rb.classList.add('spin');
   try {
-    const me = await api('login'); if (me.token) { S.token = me.token; ls.set('ts_token', me.token); delete me.token }
-    S.me = me; S.code = me.code; ls.set('ts_code', me.code); ls.set('pms_me_' + me.code, JSON.stringify(me)); S.stale = false; S.err = '';
-    if (me.isCoordinator) { if (!S.team.length) api('team').then(t => S.team = t).catch(() => { }); S.dash = await api('dashboard'); S.dash.at = Date.now(); ls.set('pms_dash', JSON.stringify(S.dash)) }
-    loadField(); if (route().view === 'field') try { $('#ff').contentWindow.load() } catch (e) { }
+    applyBoot(await bootCall({ token: S.token })); S.sync = false;
+    if (route().view === 'field') try { $('#ff').contentWindow.load() } catch (e) { }
     render(); if (!quiet) toast('Updated');
+    afterBoot();
   } catch (e) {
+    S.sync = false;
     if (isAuthErr(e)) return logout(e.message);
     if (S.me) { S.stale = true; S.err = e.message; render() } else renderError(e.message);
   }
 }
-async function loadField() {   // Field database completion (Overview card ke liye)
-  try { S.field = await post(FIELD_API, { action: 'init', token: S.token }); render() } catch (e) { S.field = { err: e.message.replace(/^LOGIN:\s*/, '') }; render() }
+/* Boot ke baad peeche se: Field data pehle se load (khulte hi turant dikhe), coordinator ke messages + team list */
+function afterBoot() {
+  ensureFrame();
+  if (isMgr()) setTimeout(() => { if (!S.msgs) loadMsgs(); if (!S.team.length) api('team').then(t => { S.team = t; ls.set('pms_team', JSON.stringify(t)) }).catch(() => { }) }, 1500);
 }
+function ensureFrame() { const fw = $('#fwrap'); if (fw && !$('#ff')) fw.innerHTML = `<iframe class="frame" id="ff" src="${FIELD_APP}" title="Field data" allow="microphone"></iframe>` }
+// Field app (iframe) apna data sfd_cache me rakhta hai: wahi se Overview ka Field card, alag call nahi
+addEventListener('storage', e => { if (e.key === 'sfd_cache' && e.newValue && S.me) { try { S.field = JSON.parse(e.newValue) } catch (x) { } if (route().view !== 'field') render() } });
 function logout(msg) {
   ['ts_token', 'ts_pin', 'ts_me_' + S.code, 'pms_me_' + S.code, 'pms_dash', 'sfd_cache'].forEach(k => ls.set(k, null));
-  S = Object.assign(S, { token: '', me: null, dash: null, field: null, msgs: null, ed: null, person: '', menu: '' }); history.replaceState(null, '', location.pathname); renderLogin(msg);
+  S = Object.assign(S, { token: '', me: null, dash: null, field: null, msgs: null, ed: null, person: '', menu: '', draft: {} }); history.replaceState(null, '', location.pathname); renderLogin(msg);
 }
 
 /* ---------------- login (PRD 6.4 A) ---------------- */
@@ -371,14 +393,15 @@ async function renderLogin(err) {
     <p style="margin:14px 0 0;text-align:center">Forgot your PIN? Ask your coordinator.</p></form></div>`;
   $('#lf').onsubmit = async ev => {
     ev.preventDefault(); const b = $('#lb'); b.disabled = true; b.textContent = 'Signing in…';
-    try { const me = await post(TASKS_API, { action: 'login', code: $('#lc').value, pin: $('#lp').value.trim() });
-      S.token = me.token; ls.set('ts_token', me.token); ls.set('ts_code', me.code); delete me.token; S.me = me; S.code = me.code;
-      if (!location.hash) go('overview'); render(); refresh(true) }
+    try { applyBoot(await bootCall({ code: $('#lc').value, pin: $('#lp').value.trim() })); try { S.field = JSON.parse(ls.get('sfd_cache')) } catch (e) { }
+      if (!location.hash) go('overview'); render(); afterBoot() }
     catch (e) { renderLogin(e.message) }
   };
-  try { S.team = await post(TASKS_API, { action: 'team' }) } catch (e) { }
-  const sel = $('#lc'); if (!sel) return;
-  sel.innerHTML = `<option value="">Select your name</option>` + S.team.map(m => `<option value="${esc(m.code)}" ${m.code === S.code ? 'selected' : ''}>${esc(m.naam)}</option>`).join('');
+  const fill = () => { const sel = $('#lc'); if (!sel || !S.team.length) return; const v = sel.value;
+    sel.innerHTML = `<option value="">Select your name</option>` + S.team.map(m => `<option value="${esc(m.code)}" ${m.code === (v || S.code) ? 'selected' : ''}>${esc(m.naam)}</option>`).join('') };
+  try { S.team = JSON.parse(ls.get('pms_team')) || [] } catch (e) { } fill();   // pichhli list turant
+  try { S.team = await post(TASKS_API, { action: 'team' }); ls.set('pms_team', JSON.stringify(S.team)) } catch (e) { }
+  fill();
 }
 function renderLoading() { $('#root').innerHTML = `<div class="login"><div class="lcard"><div class="skel" style="height:22px;width:60%"></div><div class="skel" style="height:14px;width:40%;margin-top:10px"></div><p style="margin-top:18px">Loading your workspace…</p></div></div>` }
 function renderError(m) { $('#root').innerHTML = `<div class="login"><div class="lcard"><h1>Can't load the workspace</h1><div class="lerr" style="margin-top:14px">${esc(m)}</div><button class="btn pri block" onclick="boot()">Try again</button><button class="btn block" style="margin-top:8px" onclick="logout()">Sign out</button></div></div>` }
@@ -405,24 +428,24 @@ function render() {
   $('#tbar').innerHTML = `<button class="tback" onclick="go('overview')" aria-label="Back to home">${I.collapse}Back</button><div style="min-width:0"><div class="crumb">${esc(crumb)}</div><h1>${esc(title)}</h1></div>
       <label class="tsearch" ${r.view === 'field' ? 'hidden' : ''}>${I.search}<span class="sr">Search tasks</span><input class="in" id="q" type="search" placeholder="Search tasks" value="${esc(S.q)}"></label>
       <div style="display:flex;gap:4px;margin-left:${r.view === 'field' ? 'auto' : '0'}">
-        <button class="ibtn" onclick="refresh()" aria-label="Refresh">${I.refresh}</button>
+        <button class="ibtn ${S.sync ? 'spin' : ''}" onclick="refresh()" aria-label="Refresh">${I.refresh}</button>
         <button class="ibtn" onclick="toggleMenu('notif')" aria-label="Notifications, ${n} pending">${I.bell}${n ? `<span class="dot">${n}</span>` : ''}</button>
         <button class="ibtn" onclick="toggleMenu('me')" aria-label="Profile"><span class="avatar">${esc(initials(S.me.naam))}</span></button>
       </div>${S.menu ? menuHTML() : ''}`;
   $('#bnav').innerHTML = NAV().map(([k, l, ic, c]) => `<button class="${r.view === k ? 'on' : ''}" onclick="go('${k}')">${ic}${c ? `<span class="dot">${c}</span>` : ''}<span>${l.replace('Daily report', 'Report').replace('Field data', 'Field')}</span></button>`).join('');
   // Field data ek baar load hota hai aur khula rehta hai: wapas aane par turant dikhta hai
   const page = $('#page'), fw = $('#fwrap'); page.hidden = r.view === 'field'; fw.hidden = r.view !== 'field';
-  if (r.view === 'field') { if (!$('#ff')) fw.innerHTML = `<iframe class="frame" id="ff" src="${FIELD_APP}" title="Field data" allow="microphone"></iframe>` }
-  else page.innerHTML = (S.stale ? `<div class="stale" role="status">${I.clock}<span>${S.err ? 'Showing saved data. ' + esc(S.err) : 'Showing saved data, refreshing…'}</span></div>` : '') +
+  if (r.view === 'field') ensureFrame()
+  else page.innerHTML = (S.stale && S.err ? `<div class="stale" role="status">${I.clock}<span>Showing saved data. ${esc(S.err)}</span></div>` : '') +
     ({ overview: isMgr() ? vExec : vMyDay, tasks: vTasks, report: vReport, messages: vMsgs })[r.view]();
   if (r.view === 'messages' && !S.msgs) loadMsgs();
   ['#q', '#mq'].forEach(id => { const q = $(id); if (q) q.oninput = () => { S.q = q.value; if (route().view !== 'tasks') go('tasks'); else { const p = q.selectionStart; render(); const n = $(id); n.focus(); n.setSelectionRange(p, p) } } });
   // Form me kuch likha hai to background refresh drawer ko dobara nahi banata (likha hua bacha rahe)
   const box = $('#drw'), key = r.task + (r.edit ? '/edit' : '');
-  const typed = box.dataset.key === key && (r.edit ? !!box.querySelector('#ek') : [...box.querySelectorAll('textarea,input:not([type=file])')].some(x => x.value.trim()) || !!(box.querySelector('#rp') && $('#rp').files.length));
+  const typed = !!r.task && box.dataset.key === key && (r.edit ? !!box.querySelector('#ek') : [...box.querySelectorAll('textarea,input:not([type=file])')].some(x => x.value.trim()) || !!(box.querySelector('#rp') && $('#rp').files.length));
   if (!typed) renderDrawer(r.task, r.edit);
 }
-const redraw = () => { const b = $('#drw'); if (b) b.dataset.key = ''; render() };
+const redraw = () => { const b = $('#drw'); if (b) b.dataset.key = '-'; render() };
 function toggleMini() { S.mini = !S.mini; ls.set('pms_mini', S.mini ? '1' : '0'); render() }
 function toggleMenu(m) { S.menu = S.menu === m ? '' : m; render() }
 document.addEventListener('click', e => { if (S.menu && !e.target.closest('.menu,.ibtn')) { S.menu = ''; render() } });
@@ -514,8 +537,7 @@ function leadsCard(g) {
 function fieldCard() {
   const F = S.field;
   const head = '<div class="card"><div class="ch"><h3>Field database</h3><a href="#/field" style="font-size:13px">Open</a></div><div class="cb">';
-  if (!F) return head + '<div class="skel" style="height:84px"></div></div></div>';
-  if (F.err) return head + `<div class="empty" style="padding:16px"><b>Field data unavailable</b>${esc(F.err)}</div></div></div>`;
+  if (!F || !F.schema) return head + (Date.now() - S.t0 > 25000 ? '<div class="empty" style="padding:16px"><b>Field data not loaded yet</b><a href="#/field">Open Field data</a></div>' : '<div class="skel" style="height:84px"></div>') + '</div></div>';
   const rows = k => F.data[k] || [], ent = k => F.schema.find(e => e.key === k), V = rows('Villages');
   const miss = (e, r) => e.fields.some(f => f.req && (!r[f.k] || (f.t === 'tel' && !/^[6-9]\d{9}$/.test(r[f.k]))));
   const td = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
@@ -556,7 +578,8 @@ function acceptBanner() {
 }
 async function acceptAll() {
   const items = toAccept().map(t => ({ taskId: t.id, response: 'Accepted' }));
-  await withBusy('#accall', async () => { const r = await api('accept', { items }); await setMe(r.me); toast(`All ${items.length} tasks accepted. They are now in your daily report.`); redraw() });
+  toast(`All ${items.length} tasks accepted. They are now in your daily report.`);
+  await optimistic(t => t.needsAccept && Object.assign({}, t, { needsAccept: false }), () => api('accept', { items }));
 }
 
 /* ---------------- Tasks (PRD 6.4 D) ---------------- */
@@ -627,9 +650,9 @@ function renderDrawer(id, edit) {
     actions = `<div class="act"><h4>Today's report</h4><p>Takes under a minute. Due by 6 PM.</p>
     <div class="stg" role="radiogroup" aria-label="Status today">${[['Done', 'Work complete'], ['WIP', 'Some progress'], ['Not Done', 'No progress today'], ['Blocked', 'Stuck, need help']].map(([s, sub]) =>
       `<button class="st ${pk === s ? 'on' : ''}" role="radio" aria-checked="${pk === s}" onclick="pickSt('${esc(t.id)}','${s}',this)"><i style="background:${ST[s][2]}"></i><span>${ST[s][0].replace(' today', '')}<small style="display:block;font-weight:400;color:var(--mut);font-size:12px">${sub}</small></span></button>`).join('')}</div>
-    <label class="f" for="rk">What did you do today?</label><textarea class="in" id="rk" placeholder="Two lines are enough"></textarea>
-    <label class="f" for="rn">Next step <small>(optional)</small></label><input class="in" id="rn" placeholder="What will you do tomorrow?">
-    <label class="f" for="rb" id="rbl">${pk === 'Blocked' ? 'What is blocking you? Who can help?' : 'Blocker or help needed <small>(optional)</small>'}</label><textarea class="in" id="rb" placeholder="Blocker or help needed"></textarea>
+    <label class="f" for="rk">What did you do today?</label><textarea class="in" id="rk" placeholder="Two lines are enough">${esc((S.draft[t.id] || {}).kya || '')}</textarea>
+    <label class="f" for="rn">Next step <small>(optional)</small></label><input class="in" id="rn" placeholder="What will you do tomorrow?" value="${esc((S.draft[t.id] || {}).kal || '')}">
+    <label class="f" for="rb" id="rbl">${pk === 'Blocked' ? 'What is blocking you? Who can help?' : 'Blocker or help needed <small>(optional)</small>'}</label><textarea class="in" id="rb" placeholder="Blocker or help needed">${esc((S.draft[t.id] || {}).ruk || '')}</textarea>
     <label class="f">Photo proof <small>(optional)</small></label><label class="filein">${I.camera}<span id="pn">Add a photo</span><input type="file" id="rp" accept="image/*" onchange="$('#pn').textContent=this.files[0]?this.files[0].name:'Add a photo'"></label>
     <button class="btn pri block" id="rbtn" onclick="doReport('${esc(t.id)}')">Submit report</button></div>` }
   else if (mine && mine.reportedToday) actions = `<div class="act"><h4>Reported today ${stBadge(mine.reportedToday.status)}</h4><p style="margin:6px 0 0">${esc(mine.reportedToday.kya)}</p></div>`;
@@ -660,21 +683,40 @@ async function withBusy(btn, fn) { const b = btn && $(btn); if (b) { b.disabled 
 async function doAccept(id, resp) {
   const doubt = ($('#dq') || {}).value || '';
   if (resp === 'Doubt' && !doubt.trim()) return toast('Write your question first', 1);
-  await withBusy(null, async () => { const r = await api('accept', { items: [{ taskId: id, response: resp, doubt }] }); await setMe(r.me); toast(resp === 'Doubt' ? 'Question sent to the coordinator' : 'Task accepted'); redraw() });
+  toast(resp === 'Doubt' ? 'Question sent to the coordinator' : 'Task accepted');
+  await optimistic(t => t.id === id && Object.assign({}, t, resp === 'Doubt' ? { doubtPending: doubt } : { needsAccept: false }), () => api('accept', { items: [{ taskId: id, response: resp, doubt }] }));
 }
 async function doReport(id) {
   const status = S.pick[id], kya = $('#rk').value.trim(), kal = $('#rn').value.trim(), ruk = $('#rb').value.trim(), f = $('#rp').files[0];
   if (!status) return toast('Choose a status', 1); if (kya.length < 3) return toast('Write what you did today', 1); if (status === 'Blocked' && !ruk) return toast('Write what is blocking you', 1);
-  await withBusy('#rbtn', async () => { const photo = f ? await compress(f) : null; const r = await api('report', { taskId: id, status, kya, kal, rukawat: ruk, photo });
-    delete S.pick[id]; await setMe(r.me); toast(r.status === 'Verify Pending' ? 'Report sent. The accountable person will verify.' : 'Report sent'); go(route().view) });
+  let photo = null; if (f) { const b = $('#rbtn'); b.disabled = true; b.textContent = 'Preparing photo…'; try { photo = await compress(f) } catch (e) { b.disabled = false; b.textContent = 'Submit report'; return toast(e.message, 1) } }
+  const view = route().view; S.draft[id] = { kya, kal, ruk }; go(view);
+  toast(photo ? 'Report sent. Uploading photo…' : 'Report sent');
+  await optimistic(t => t.id === id && Object.assign({}, t, { reportedToday: { status, kya }, status: status === 'Done' ? 'Verify Pending' : status }),
+    async () => { const r = await api('report', { taskId: id, status, kya, kal, rukawat: ruk, photo }); delete S.pick[id]; delete S.draft[id];
+      if (photo || r.status === 'Verify Pending') toast(r.status === 'Verify Pending' ? 'Report saved. The accountable person will verify.' : 'Report and photo saved'); return r },
+    () => { toast('Report not sent. Your text is kept, please submit again.', 1); go(view, id) });
 }
 async function doVerify(id, decision) {
   const comment = $('#vc').value.trim(); if (decision !== 'approve' && !comment) return toast('Write why you are sending it back', 1);
-  await withBusy(null, async () => { const r = await api('verify', { taskId: id, decision, comment }); await setMe(r.me); toast(decision === 'approve' ? 'Approved as done' : 'Sent back'); go(route().view) });
+  await withBusy(null, async () => { const r = await api('verify', { taskId: id, decision, comment }); applyMe(r); toast(decision === 'approve' ? 'Approved as done' : 'Sent back'); go(route().view) });
 }
-async function setMe(me) {   // kaam ke baad naya data; coordinator ka dashboard bhi
-  S.me = me; ls.set('pms_me_' + me.code, JSON.stringify(me));
-  if (isMgr()) try { const d = await api('dashboard'); d.at = Date.now(); S.dash = d; ls.set('pms_dash', JSON.stringify(d)); render() } catch (e) { }
+/* Server ka jawab aaya: naya data lagao. Coordinator ka dashboard isi jawab me aata hai (purana backend ho to peeche se). */
+const PEND = new Set();   // abhi server tak pahunch rahe badlav: naya jawab aaye to bhi ye dikhte rahen
+const withPend = me => PEND.size ? Object.assign({}, me, { tasks: me.tasks.map(t => [...PEND].reduce((x, f) => f(x) || x, t)) }) : me;
+function applyMe(r) {
+  S.me = withPend(r.me); ls.set('pms_me_' + r.me.code, JSON.stringify(r.me));
+  if (r.dash) { S.dash = r.dash; S.dash.at = Date.now(); ls.set('pms_dash', JSON.stringify(r.dash)) }
+  else if (isMgr()) api('dashboard').then(d => { S.dash = d; ls.set('pms_dash', JSON.stringify(d)); render() }).catch(() => { });
+  render();
+}
+/* Turant dikhao, server peeche se save kare (2-5 sec ka intezaar nahi). Fail ho to wapas pehle jaisa. */
+async function optimistic(change, call, onFail) {
+  PEND.add(change); S.me = withPend(S.me); redraw();
+  let r; try { r = await call() } catch (e) {
+    PEND.delete(change); if (isAuthErr(e)) return logout(e.message);
+    S.me = withPend(JSON.parse(ls.get('pms_me_' + S.me.code)) || S.me); redraw(); toast(e.message, 1); onFail && onFail(e); return }
+  PEND.delete(change); applyMe(r);
 }
 
 /* ---------------- Task add / edit / delete (sirf coordinator; Sheet me seedha) ---------------- */
@@ -714,13 +756,13 @@ async function saveTask(id) {
   const task = { id, kaam: $('#ek').value.trim(), a: S.ed.a, r: S.ed.r.join(','), din: $('#ed').value, priority: S.ed.pr, done: $('#edn').value.trim(), steps: $('#est').value.trim() };
   if (task.kaam.length < 3) return toast('Write the task name', 1); if (!task.a) return toast('Choose the accountable person', 1);
   if (!task.r) return toast('Choose at least one responsible person', 1); if (!(parseInt(task.din, 10) >= 1)) return toast('Enter the number of days', 1);
-  await withBusy('#esave', async () => { const r = await api('taskSave', { task }); await setMe(r.me); S.ed = null;
+  await withBusy('#esave', async () => { const r = await api('taskSave', { task }); applyMe(r); S.ed = null;
     toast(id ? 'Changes saved to the Sheet' : `Task added (${r.id})`); go('tasks', r.id) });
 }
 async function delTask(id) {
   const t = dashTask(id); if (!t) return;
   if (!confirm(`Delete "${t.kaam}" permanently?\n\nIt is removed from the Sheet. Its old reports stay in the record.\n\nIf the work is finished, approve it as Done instead.`)) return;
-  await withBusy('#delbtn', async () => { const r = await api('taskDelete', { taskId: id }); await setMe(r.me); toast('Task deleted from the Sheet'); go('tasks') });
+  await withBusy('#delbtn', async () => { const r = await api('taskDelete', { taskId: id }); applyMe(r); toast('Task deleted from the Sheet'); go('tasks') });
 }
 
 /* ---------------- Messages (coordinator): subah / shaam ke WhatsApp message ---------------- */
