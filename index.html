@@ -193,26 +193,38 @@ table.t{width:100%;border-collapse:collapse;font-size:14px}
 .call{display:inline-grid;place-items:center;width:32px;height:32px;border-radius:var(--rc);border:1px solid var(--line);color:var(--ok);flex:none;margin-left:auto}
 
 /* ---------- field data frame ---------- */
-.frame{border:0;width:100%;height:calc(100vh - 64px);display:block;background:var(--bg)}
-.page.flush{padding:0;max-width:none}
+/* dvh = jitni screen sach me dikh rahi hai (Android ka address bar chhod ke). Isse Field app ke neeche wale button kat-te nahi. */
+.frame{border:0;width:100%;height:calc(100vh - 64px);height:calc(100dvh - 64px);display:block;background:var(--bg)}
+body.field{overflow:hidden}
+.tback{display:none;align-items:center;gap:4px;height:40px;padding:0 12px 0 8px;border-radius:var(--rc);background:var(--pri-l);color:var(--pri-d);font-weight:600;font-size:14px;flex:none}
+.msearch{display:none;position:relative;flex:1 1 100%}
+.msearch svg{position:absolute;left:11px;top:12px;color:var(--mut)}.msearch input{padding-left:36px}
+.tscroll{overflow-x:auto}.tscroll .t th{position:static}
+@media (max-width:1179px){.desk{display:none}.mcards{display:grid;grid-template-columns:1fr 1fr;gap:10px}.mcards .tcard{margin:0}}
 
 /* ---------- toast ---------- */
 #toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 16px;border-radius:var(--rc);font-weight:500;font-size:14px;z-index:90;max-width:90vw;text-align:center}
 #toast.bad{background:var(--bad-t)}
 
 /* ---------- responsive (PRD 6.5) ---------- */
-@media (max-width:1279px){.msgs{grid-template-columns:1fr}.kpis{grid-template-columns:repeat(3,minmax(0,1fr))}.grid3{grid-template-columns:1fr 1fr}.tsearch{width:220px}}
-@media (max-width:1023px){.side{--side:72px}.side .sitem span,.side .sitem .cnt,.side .sgrp,.side .brand b{display:none}.side .sitem{justify-content:center}.main{margin-left:72px}.grid2{grid-template-columns:1fr}.page{padding:20px 16px 40px}.tbar{padding:0 16px}}
+@media (max-width:1279px){.msgs{grid-template-columns:minmax(0,1fr)}.kpis{grid-template-columns:repeat(3,minmax(0,1fr))}.grid3{grid-template-columns:repeat(2,minmax(0,1fr))}.tsearch{width:220px}}
+@media (max-width:1023px){.brand{padding:0 8px;justify-content:center}.brand img{height:26px;max-width:56px;object-fit:contain}.side{--side:72px}.side .sitem span,.side .sitem .cnt,.side .sgrp,.side .brand b{display:none}.side .sitem{justify-content:center}.main{margin-left:72px}.grid2{grid-template-columns:minmax(0,1fr)}.page{padding:20px 16px 40px}.tbar{padding:0 16px}}
 @media (max-width:767px){
   .side{display:none}.main,.side.mini~.main{margin-left:0}
   .tbar{height:56px;padding:0 12px}.tbar h1{font-size:17px}.tsearch{display:none}
   .page{padding:16px 12px calc(88px + env(safe-area-inset-bottom))}
   .page.flush{padding:0}
-  .frame{height:calc(100vh - 56px)}
+  .frame{height:calc(100vh - 56px);height:calc(100dvh - 56px)}
+  body.field .tback{display:inline-flex}
+  .msearch{display:block}
+  .chip{height:38px;flex:none}
+  .chips{flex-wrap:nowrap;overflow-x:auto;width:100%;scrollbar-width:none;padding-bottom:2px}.chips::-webkit-scrollbar{display:none}
+  body.field .crumb{display:none}
+  .tools .seg[aria-label="View"]{margin-left:0!important}
   .kpis,.kpis.k4{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.kpi b{font-size:24px}
-  .grid3{grid-template-columns:1fr}
+  .grid3{grid-template-columns:minmax(0,1fr)}
   .t th{top:56px}
-  .desk{display:none}.mcards{display:block}
+  .desk{display:none}.mcards{display:block}.mcards .tcard{margin-bottom:10px}
   .phead h2{font-size:19px}
   .bnav{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:30;background:#fff;border-top:1px solid var(--line);padding:6px 4px calc(6px + env(safe-area-inset-bottom))}
   .bnav button{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:11.5px;font-weight:600;color:var(--mut);padding:4px 0;position:relative}
@@ -236,7 +248,7 @@ const TASKS_API = 'https://script.google.com/macros/s/AKfycbydef8G6aaxfIyQgwJ_84
 const FIELD_API = 'https://script.google.com/macros/s/AKfycbxgNOAHAa7v1LmnoklvbeHt2kGYBB_7Bq2tqI-8yJQT73VZXgjytt6J_JOetGF5CU4c/exec';
 const FIELD_APP = '../Sarola-Database/?embed=1';   // Field Data screen (same website, isliye login wahan bhi chalta hai)
 const PROJECT = 'Project Sarola';
-const VER = '30 Oct · v2';
+const VER = '30 Oct · v3';
 /* =============================================================== */
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -331,7 +343,7 @@ async function refresh(quiet) {
     const me = await api('login'); if (me.token) { S.token = me.token; ls.set('ts_token', me.token); delete me.token }
     S.me = me; S.code = me.code; ls.set('ts_code', me.code); ls.set('pms_me_' + me.code, JSON.stringify(me)); S.stale = false; S.err = '';
     if (me.isCoordinator) { if (!S.team.length) api('team').then(t => S.team = t).catch(() => { }); S.dash = await api('dashboard'); S.dash.at = Date.now(); ls.set('pms_dash', JSON.stringify(S.dash)) }
-    loadField();
+    loadField(); if (route().view === 'field') try { $('#ff').contentWindow.load() } catch (e) { }
     render(); if (!quiet) toast('Updated');
   } catch (e) {
     if (isAuthErr(e)) return logout(e.message);
@@ -382,7 +394,7 @@ function render() {
   const r = route(), [title, crumb] = TITLES[r.view], n = notifCount();
   document.body.className = r.view === 'field' ? 'field' : '';
   if (!$('#page')) $('#root').innerHTML = `<aside class="side" id="side" aria-label="Main navigation"></aside>
-  <div class="main"><header class="tbar" id="tbar"></header><main class="page" id="page"></main></div>
+  <div class="main"><header class="tbar" id="tbar"></header><main class="page" id="page"></main><div id="fwrap" hidden></div></div>
   <nav class="bnav" id="bnav" aria-label="Sections"></nav><div id="drw"></div>`;
   const side = $('#side'); side.className = 'side' + (S.mini ? ' mini' : '');
   side.innerHTML = `<div class="brand"><img src="logo.png" alt="" onerror="this.remove()"><b>Akshardham PMS</b></div>
@@ -390,7 +402,7 @@ function render() {
       ${NAV().map(([k, l, ic, c]) => `<a class="sitem ${r.view === k ? 'on' : ''}" href="#/${k}" ${r.view === k ? 'aria-current="page"' : ''} title="${l}">${ic}<span>${l}</span>${c ? `<em class="cnt">${c}</em>` : ''}</a>`).join('')}
     </nav>
     <div class="sfoot"><button class="sitem" onclick="toggleMini()" title="${S.mini ? 'Expand' : 'Collapse'} sidebar">${S.mini ? I.expand : I.collapse}<span>Collapse</span></button></div>`;
-  $('#tbar').innerHTML = `<div style="min-width:0"><div class="crumb">${esc(crumb)}</div><h1>${esc(title)}</h1></div>
+  $('#tbar').innerHTML = `<button class="tback" onclick="go('overview')" aria-label="Back to home">${I.collapse}Back</button><div style="min-width:0"><div class="crumb">${esc(crumb)}</div><h1>${esc(title)}</h1></div>
       <label class="tsearch" ${r.view === 'field' ? 'hidden' : ''}>${I.search}<span class="sr">Search tasks</span><input class="in" id="q" type="search" placeholder="Search tasks" value="${esc(S.q)}"></label>
       <div style="display:flex;gap:4px;margin-left:${r.view === 'field' ? 'auto' : '0'}">
         <button class="ibtn" onclick="refresh()" aria-label="Refresh">${I.refresh}</button>
@@ -398,12 +410,13 @@ function render() {
         <button class="ibtn" onclick="toggleMenu('me')" aria-label="Profile"><span class="avatar">${esc(initials(S.me.naam))}</span></button>
       </div>${S.menu ? menuHTML() : ''}`;
   $('#bnav').innerHTML = NAV().map(([k, l, ic, c]) => `<button class="${r.view === k ? 'on' : ''}" onclick="go('${k}')">${ic}${c ? `<span class="dot">${c}</span>` : ''}<span>${l.replace('Daily report', 'Report').replace('Field data', 'Field')}</span></button>`).join('');
-  const page = $('#page'); page.className = 'page' + (r.view === 'field' ? ' flush' : '');
-  if (r.view === 'field') { if (!$('#ff')) page.innerHTML = `<iframe class="frame" id="ff" src="${FIELD_APP}" title="Field data" allow="microphone"></iframe>` }   // dobara load nahi
+  // Field data ek baar load hota hai aur khula rehta hai: wapas aane par turant dikhta hai
+  const page = $('#page'), fw = $('#fwrap'); page.hidden = r.view === 'field'; fw.hidden = r.view !== 'field';
+  if (r.view === 'field') { if (!$('#ff')) fw.innerHTML = `<iframe class="frame" id="ff" src="${FIELD_APP}" title="Field data" allow="microphone"></iframe>` }
   else page.innerHTML = (S.stale ? `<div class="stale" role="status">${I.clock}<span>${S.err ? 'Showing saved data. ' + esc(S.err) : 'Showing saved data, refreshing…'}</span></div>` : '') +
     ({ overview: isMgr() ? vExec : vMyDay, tasks: vTasks, report: vReport, messages: vMsgs })[r.view]();
   if (r.view === 'messages' && !S.msgs) loadMsgs();
-  const q = $('#q'); if (q) q.oninput = () => { S.q = q.value; if (route().view !== 'tasks') go('tasks'); else { const p = q.selectionStart; render(); const n = $('#q'); n.focus(); n.setSelectionRange(p, p) } };
+  ['#q', '#mq'].forEach(id => { const q = $(id); if (q) q.oninput = () => { S.q = q.value; if (route().view !== 'tasks') go('tasks'); else { const p = q.selectionStart; render(); const n = $(id); n.focus(); n.setSelectionRange(p, p) } } });
   // Form me kuch likha hai to background refresh drawer ko dobara nahi banata (likha hua bacha rahe)
   const box = $('#drw'), key = r.task + (r.edit ? '/edit' : '');
   const typed = box.dataset.key === key && (r.edit ? !!box.querySelector('#ek') : [...box.querySelectorAll('textarea,input:not([type=file])')].some(x => x.value.trim()) || !!(box.querySelector('#rp') && $('#rp').files.length));
@@ -454,10 +467,10 @@ function vExec() {
     <div class="legend">${ORDER.map(s => `<span><i style="background:${ST[s][2]}"></i>${ST[s][0]} <b class="num">${c[s] || 0}</b></span>`).join('')}</div></div></div>
   <div class="grid2">
     <div class="card"><div class="ch"><h3>Team accountability</h3><small>Today</small></div>
-      <table class="t"><thead><tr><th>Person</th><th class="r">Open</th><th class="r">Overdue</th><th>Today's reports</th><th class="r">Accepted</th></tr></thead><tbody>
+      <div class="tscroll"><table class="t"><thead><tr><th>Person</th><th class="r">Open</th><th class="r">Overdue</th><th>Today's reports</th><th class="r">Accepted</th></tr></thead><tbody>
       ${d.people.map(p => { const o = p.total - (p.st['Done'] || 0) - (p.st['Verify Pending'] || 0); return `<tr onclick="S.scope='all';S.filter='all';S.q='';S.person='${esc(p.code)}';go('tasks')" title="Show ${esc(p.naam)}'s tasks"><td><div style="display:flex;align-items:center;gap:8px"><b>${esc(p.naam)}</b>${tel(p.mobile, p.naam)}</div></td><td class="r num">${o}</td><td class="r num" style="${p.late ? 'color:var(--bad-t);font-weight:600' : ''}">${p.late}</td>
         <td><div style="display:flex;align-items:center;gap:8px"><div class="bar" style="flex:1"><i style="width:${p.dueToday ? p.repToday / p.dueToday * 100 : 0}%"></i></div><span class="num" style="font-size:13px">${p.repToday}/${p.dueToday}</span></div></td><td class="r num">${p.accepted}/${p.accTotal}</td></tr>` }).join('')}
-      </tbody></table></div>
+      </tbody></table></div></div>
     <div class="card"><div class="ch"><h3>Needs attention</h3><small>${att.length} items</small></div>
       ${att.length ? att.slice(0, 12).map(([ic, cl, t, why, k, mob, who]) => `<div class="att" ${t ? `role="button" tabindex="0" style="cursor:pointer" onclick="go('tasks','${esc(t.id)}')"` : ''}><span class="ic badge ${cl}" style="padding:0">${ic}</span><span><b>${esc(t ? t.kaam : k)}</b><small>${esc(why)}</small></span>${tel(mob, who)}</div>`).join('') + (att.length > 12 ? `<div class="att"><small>+ ${att.length - 12} more</small></div>` : '')
       : '<div class="empty"><b>Nothing needs attention</b>No overdue, blocked or unowned work.</div>'}</div>
@@ -574,7 +587,7 @@ function vTasks() {
   return `<div class="phead"><div><h2>${S.scope === 'all' ? (pn ? esc(pn) + "'s tasks" : 'All tasks') : 'My tasks'}</h2><p>${list.length} of ${base.length} tasks${S.q ? ` matching “${esc(S.q)}”` : ''}</p></div>
     ${isMgr() ? `<button class="btn pri" onclick="go('tasks','new')">${I.plus}New task</button>` : ''}</div>
   ${S.scope === 'mine' ? acceptBanner() : ''}
-  <div class="tools">${pn ? `<button class="chip on" onclick="S.person='';render()" aria-label="Clear person filter">${esc(pn)} ${I.x}</button>` : ''}${isMgr() ? `<div class="seg" role="tablist" aria-label="Scope"><button class="${S.scope === 'mine' ? 'on' : ''}" onclick="S.scope='mine';S.person='';render()">My tasks</button><button class="${S.scope === 'all' ? 'on' : ''}" onclick="S.scope='all';render()">All tasks</button></div>` : ''}
+  <div class="tools"><label class="msearch">${I.search}<span class="sr">Search tasks</span><input class="in" id="mq" type="search" placeholder="Search tasks or names" value="${esc(S.q)}"></label>${pn ? `<button class="chip on" onclick="S.person='';render()" aria-label="Clear person filter">${esc(pn)} ${I.x}</button>` : ''}${isMgr() ? `<div class="seg" role="tablist" aria-label="Scope"><button class="${S.scope === 'mine' ? 'on' : ''}" onclick="S.scope='mine';S.person='';render()">My tasks</button><button class="${S.scope === 'all' ? 'on' : ''}" onclick="S.scope='all';render()">All tasks</button></div>` : ''}
     <div class="chips">${fs.map(([k, l, f]) => `<button class="chip ${S.filter === k ? 'on' : ''}" onclick="S.filter='${k}';render()">${l} <b class="num">${base.filter(f).length}</b></button>`).join('')}</div>
     <div class="seg" style="margin-left:auto" aria-label="View"><button class="${S.tview === 'list' ? 'on' : ''}" onclick="setView('list')" aria-label="List view">${I.list}</button><button class="${S.tview === 'board' ? 'on' : ''}" onclick="setView('board')" aria-label="Board view">${I.board}</button></div></div>
   ${body}`;
@@ -627,7 +640,8 @@ function renderDrawer(id, edit) {
     <div class="dh"><div style="flex:1;min-width:0"><div class="crumb">${esc(t.id)} · ${esc(t.page || PROJECT)}</div><h3 id="dt">${esc(t.kaam)}</h3><div style="display:flex;gap:6px;flex-wrap:wrap">${stBadge(t.status)}${t.priority === 'High' ? '<span class="badge s-nd">High priority</span>' : ''}${(t.roles || []).map(x => `<span class="role">${ROLE[x]}</span>`).join('')}</div></div>
       <button class="ibtn" onclick="go('${back}')" aria-label="Close">${I.x}</button></div>
     <div class="db">
-      <dl class="kv"><dt>Due</dt><dd>${(d => !t.deadline || d.includes('>' + esc(t.deadline) + '<') ? d : esc(t.deadline) + ' · ' + d)(dueTxt(t))}</dd><dt>Accountable</dt><dd>${esc(t.aNames || '—')}</dd><dt>Responsible</dt><dd>${esc(t.rNames || '—')}</dd></dl>
+      ${actions && !(mine && mine.needsAccept) ? actions : ''}
+      <dl class="kv" ${actions && !(mine && mine.needsAccept) ? 'style="margin-top:16px"' : ''}><dt>Due</dt><dd>${(d => !t.deadline || d.includes('>' + esc(t.deadline) + '<') ? d : esc(t.deadline) + ' · ' + d)(dueTxt(t))}</dd><dt>Accountable</dt><dd>${esc(t.aNames || '—')}</dd><dt>Responsible</dt><dd>${esc(t.rNames || '—')}</dd></dl>
       ${t.done ? `<div class="box"><b>Done when</b>${esc(t.done)}</div>` : ''}
       ${t.steps ? `<div class="box"><b>How to do it</b>${esc(t.steps)}</div>` : ''}
       ${t.note ? `<div class="box" style="background:var(--warn-l)"><b>Note</b>${esc(t.note)}</div>` : ''}
@@ -635,7 +649,7 @@ function renderDrawer(id, edit) {
       ${dt && (dt.today || []).length && open_(dt.status) ? `<div class="box"><b>Today's reports</b><div class="who">${dt.today.map(x => `<span class="badge ${x.status ? ST[x.status][1] : 's-ns'}">${esc(x.naam)}: ${x.status ? esc(ST[x.status][0]) : 'not yet'}</span>`).join('')}</div></div>` : ''}
       ${dt && dt.noOwner ? '<div class="box" style="background:var(--bad-l);color:var(--bad-t)"><b style="color:var(--bad-t)">No owner</b>Choose an accountable and a responsible person (Edit).</div>' : ''}
       ${dt ? `<div class="brow" style="margin-top:0"><button class="btn" onclick="go('tasks','${esc(t.id)}','edit')">${I.edit}Edit</button><button class="btn danger" id="delbtn" onclick="delTask('${esc(t.id)}')">${I.trash}Delete</button></div>` : ''}
-      ${actions || `<p style="color:var(--mut);font-size:13.5px">${mine && mine.canReport ? '' : mine ? 'You are kept informed on this task.' : 'You are not on this task.'} ${mine && mine.canReport ? '' : 'Only the accountable and responsible people can report on it.'}</p>`}
+      ${actions ? (mine && mine.needsAccept ? actions : '') : `<p style="color:var(--mut);font-size:13.5px">${mine && mine.canReport ? '' : mine ? 'You are kept informed on this task.' : 'You are not on this task.'} ${mine && mine.canReport ? '' : 'Only the accountable and responsible people can report on it.'}</p>`}
     </div></aside>`;
 }
 function pickSt(id, st, el) {   // status chuno bina form dobara banaye
