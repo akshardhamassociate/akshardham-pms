@@ -249,7 +249,7 @@ const TASKS_API = 'https://script.google.com/macros/s/AKfycbydef8G6aaxfIyQgwJ_84
 const FIELD_API = 'https://script.google.com/macros/s/AKfycbxgNOAHAa7v1LmnoklvbeHt2kGYBB_7Bq2tqI-8yJQT73VZXgjytt6J_JOetGF5CU4c/exec';
 const FIELD_APP = '../Sarola-Database/?embed=1';   // Field Data screen (same website, isliye login wahan bhi chalta hai)
 const PROJECT = 'Project Sarola';
-const VER = '30 Oct · v4';
+const VER = '2 Nov · v5';
 /* =============================================================== */
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -388,7 +388,8 @@ async function renderLogin(err) {
     <h1>Akshardham PMS</h1><p>Project management and field operations</p>
     ${err ? `<div class="lerr" role="alert">${esc(err)}</div>` : ''}
     <label class="f" for="lc">Name</label><select class="in" id="lc" required><option value="">Loading team…</option></select>
-    <label class="f" for="lp">PIN</label><input class="in pin" id="lp" type="password" inputmode="numeric" maxlength="6" autocomplete="current-password" required>
+    <label class="f" for="lp">PIN</label><input class="in pin" id="lp" type="password" inputmode="numeric" maxlength="6" autocomplete="current-password" placeholder="••••" aria-describedby="lph" required>
+    <p class="hint" id="lph" style="margin:6px 0 0">Hint: your PIN is the last 4 digits of your mobile number.</p>
     <button class="btn pri block" id="lb">Sign in</button>
     <p style="margin:14px 0 0;text-align:center">Forgot your PIN? Ask your coordinator.</p></form></div>`;
   $('#lf').onsubmit = async ev => {
